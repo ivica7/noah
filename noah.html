@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Sintflut und Noah - Arche Game</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #87CEEB;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <script>
+    // Canvas-Setup
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = 800;
+    canvas.height = 600;
+
+    // Farben und Konstanten
+    const SKY_BLUE = "#87CEEB";
+    const BLUE = "#0000FF";
+    const BROWN = "#8B4513";
+    const DARK_BROWN = "#5D3A1A";
+    const BLACK = "#000000";
+    const GREY = "#AAAAAA";
+
+    // Arche-Konstanten
+    const ARK_WIDTH = 100;
+    const ARK_HEIGHT = 40;
+
+    // Noah-Konstanten
+    const NOAH_WIDTH = 30;
+    const NOAH_HEIGHT = 30;
+    const NOAH_SPEED = 5;
+
+    // Tier-Konstanten
+    const ANIMAL_WIDTH = 30;
+    const ANIMAL_HEIGHT = 30;
+    const ANIMAL_SPEED = 3;
+
+    // Wasser und Boost
+    const WATER_RISE_SPEED = 0.05;
+    const BOOST_DURATION = 500;
+    const BOOST_MULTIPLIER = 2;
+
+    // Gerüst: unteres Drittel des Canvas
+    const scaffoldHeight = canvas.height / 3;
+    const scaffoldY = canvas.height - scaffoldHeight;
+
+    // Objekte:
+    // Die Arche steht fix auf dem Gerüst (mittig)
+    const ark = {
+      x: canvas.width / 2 - ARK_WIDTH / 2,
+      y: scaffoldY - ARK_HEIGHT,
+      width: ARK_WIDTH,
+      height: ARK_HEIGHT
+    };
+
+    // Noah startet auf dem Gerüst, nahe der Mitte
+    const noah = {
+      x: canvas.width / 2 - NOAH_WIDTH / 2,
+      y: scaffoldY - NOAH_HEIGHT,
+      width: NOAH_WIDTH,
+      height: NOAH_HEIGHT
+    };
+
+    let score = 0;
+    let waterHeight = 0;
+    let animals = [];
+
+    // Boost-Variablen für Noah
+    let boostCharges = 0;
+    let lastScoreForBoost = 0;
+    let boostActive = false;
+    let boostEndTime = 0;
+
+    // Tastatursteuerung
+    const keys = {};
+    let spacePressed = false;
+    document.addEventListener('keydown', (e) => {
+      if (e.code === "Space" && !spacePressed) {
+        spacePressed = true;
+        if (boostCharges > 0 && !boostActive) {
+          boostActive = true;
+          boostCharges--;
+          boostEndTime = Date.now() + BOOST_DURATION;
+        }
+      }
+      keys[e.code] = true;
+    });
+    document.addEventListener('keyup', (e) => {
+      if (e.code === "Space") {
+        spacePressed = false;
+      }
+      keys[e.code] = false;
+    });
+
+    // Animal-Klasse
+    function Animal() {
+      this.x = Math.random() * (canvas.width - ANIMAL_WIDTH);
+      this.y = -ANIMAL_HEIGHT;
+      this.width = ANIMAL_WIDTH;
+      this.height = ANIMAL_HEIGHT;
+      this.collected = false;
+      this.delivered = false;
+    }
+
+    Animal.prototype.update = function() {
+      if (this.collected) {
+        // Bewegung in Richtung Arche
+        let targetX = ark.x + ark.width / 2 - this.width / 2;
+        let targetY = ark.y + ark.height / 2 - this.height / 2;
+        let dx = targetX - this.x;
+        let dy = targetY - this.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 5) {
+          this.delivered = true;
+        } else {
+          this.x += (dx / dist) * ANIMAL_SPEED;
+          this.y += (dy / dist) * ANIMAL_SPEED;
+        }
+      } else {
+        // Normales Fallen
+        this.y += ANIMAL_SPEED;
+      }
+    };
+
+    Animal.prototype.draw = function() {
+      // Tier mit radialem Farbverlauf
+      let grad = ctx.createRadialGradient(
+        this.x + this.width/2, this.y + this.height/2, this.width/4,
+        this.x + this.width/2, this.y + this.height/2, this.width/2
+      );
+      grad.addColorStop(0, "#7CFC00"); // LawnGreen
+      grad.addColorStop(1, "#32CD32"); // LimeGreen
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      if (typeof ctx.ellipse === 'function') {
+        ctx.ellipse(this.x + this.width / 2, this.y + this.height / 2, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
+      } else {
+        ctx.arc(this.x + this.width/2, this.y + this.height/2, this.width/2, 0, Math.PI*2);
+      }
+      ctx.fill();
+    };
+
+    // Erzeuge alle 1,5 Sekunden ein neues Tier
+    setInterval(() => {
+      animals.push(new Animal());
+    }, 1500);
+
+    // Funktion für Rechteck-Kollisionsprüfung
+    function rectIntersect(r1, r2) {
+      return !(
+        r2.x > r1.x + r1.width ||
+        r2.x + r2.width < r1.x ||
+        r2.y > r1.y + r1.height ||
+        r2.y + r2.height < r1.y
+      );
+    }
+
+    let gameRunning = true;
+    function update() {
+      if (!gameRunning) return;
+
+      // Boost-Status prüfen
+      if (boostActive && Date.now() > boostEndTime) {
+        boostActive = false;
+      }
+      let currentSpeed = NOAH_SPEED;
+      if (boostActive) {
+        currentSpeed *= BOOST_MULTIPLIER;
+      }
+
+      // Noah bewegen
+      if (keys["ArrowLeft"]) {
+        noah.x -= currentSpeed;
+      }
+      if (keys["ArrowRight"]) {
+        noah.x += currentSpeed;
+      }
+      if (keys["ArrowUp"]) {
+        noah.y -= currentSpeed;
+      }
+      if (keys["ArrowDown"]) {
+        noah.y += currentSpeed;
+      }
+      // Grenzen für Noah
+      if (noah.x < 0) noah.x = 0;
+      if (noah.x + noah.width > canvas.width) noah.x = canvas.width - noah.width;
+      if (noah.y < 0) noah.y = 0;
+      if (noah.y + noah.height > canvas.height) noah.y = canvas.height - noah.height;
+
+      // Spielende: Wenn Noah das Wasser berührt
+      if (noah.y + noah.height >= canvas.height - waterHeight) {
+        gameOver();
+        return;
+      }
+
+      // Tiere aktualisieren
+      for (let i = animals.length - 1; i >= 0; i--) {
+        const animal = animals[i];
+        animal.update();
+
+        // Spielende: Berührt ein Tier das Wasser, endet das Spiel
+        if (animal.y + animal.height >= canvas.height - waterHeight) {
+          gameOver();
+          return;
+        }
+
+        // Wenn ein Tier von Noah berührt wird, als gesammelt markieren
+        if (!animal.collected && rectIntersect(noah, animal)) {
+          animal.collected = true;
+        }
+
+        // Wird ein Tier (wegen Noah oder zufällig) an der Arche geliefert, zählt es
+        if (animal.delivered || rectIntersect(ark, animal)) {
+          score++;
+          animals.splice(i, 1);
+          continue;
+        }
+
+        // Tiere, die den Bildschirm verlassen, entfernen
+        if (animal.y > canvas.height) {
+          animals.splice(i, 1);
+          continue;
+        }
+      }
+
+      // Neue Boost-Ladungen für jeweils 10 eingesammelte Tiere
+      if (score - lastScoreForBoost >= 10) {
+        let newCharges = Math.floor((score - lastScoreForBoost) / 10);
+        boostCharges += newCharges;
+        lastScoreForBoost += newCharges * 10;
+      }
+
+      // Wasser steigt
+      waterHeight += WATER_RISE_SPEED;
+      if (ark.y + ark.height >= canvas.height - waterHeight) {
+        gameOver();
+        return;
+      }
+
+      render();
+      requestAnimationFrame(update);
+    }
+
+    // Zeichnet Noah als Figur mit Kopf und Körper
+    function drawNoah() {
+      ctx.save();
+      ctx.translate(noah.x, noah.y);
+      // Körper
+      ctx.fillStyle = "#FF6347"; // Tomato
+      ctx.fillRect(0, noah.height/2, noah.width, noah.height/2);
+      // Kopf
+      ctx.beginPath();
+      ctx.arc(noah.width/2, noah.height/4, noah.width/2, 0, Math.PI*2);
+      ctx.fillStyle = "#FFDAB9"; // Peach
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Helferfunktion: Zeichnet abgerundete Rechtecke
+    function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+      if (typeof stroke === 'undefined') {
+        stroke = true;
+      }
+      if (typeof radius === 'undefined') {
+        radius = 5;
+      }
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+      if (fill) {
+        ctx.fill();
+      }
+      if (stroke) {
+        ctx.stroke();
+      }
+    }
+
+    function render() {
+      // Himmel: linearer Farbverlauf
+      let skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      skyGradient.addColorStop(0, "#87CEEB");
+      skyGradient.addColorStop(1, "#FFFFFF");
+      ctx.fillStyle = skyGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Gerüst (Holzplanken)
+      ctx.fillStyle = GREY;
+      ctx.fillRect(0, scaffoldY, canvas.width, scaffoldHeight);
+
+      // Wasser: Farbverlauf von Hell- zu Dunkelblau (über dem Gerüst)
+      let waterGradient = ctx.createLinearGradient(0, canvas.height - waterHeight, 0, canvas.height);
+      waterGradient.addColorStop(0, "#00BFFF");
+      waterGradient.addColorStop(1, "#0000FF");
+      ctx.fillStyle = waterGradient;
+      ctx.fillRect(0, canvas.height - waterHeight, canvas.width, waterHeight);
+
+      // Arche: Abgerundetes Rechteck mit Schatten
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 5;
+      ctx.fillStyle = DARK_BROWN;
+      roundRect(ctx, ark.x, ark.y, ark.width, ark.height, 10, true, false);
+      ctx.restore();
+
+      // Noah zeichnen
+      drawNoah();
+
+      // Tiere zeichnen
+      animals.forEach(animal => {
+        animal.draw();
+      });
+
+      // Score & Boost-Anzeige
+      ctx.fillStyle = BLACK;
+      ctx.font = "24px Arial";
+      ctx.fillText("Score: " + score, 10, 30);
+      ctx.fillText("Boost Charges: " + boostCharges, 10, 60);
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      ctx.fillStyle = BLACK;
+      ctx.font = "36px Arial";
+      ctx.fillText("Game Over! Final Score: " + score, canvas.width / 2 - 200, canvas.height / 2);
+    }
+
+    update();
+  </script>
+</body>
+</html>
